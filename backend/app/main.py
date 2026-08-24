@@ -4,6 +4,8 @@ from fastapi import FastAPI, Header, HTTPException, Request
 
 from .e2e import run_evaluation
 from .event_store import EventStore
+from .health import router as health_router
+from .observability import metrics
 from .razorpay import WebhookVerificationError, parse_payment_webhook
 
 app = FastAPI(
@@ -12,6 +14,7 @@ app = FastAPI(
     description="AI revenue leakage investigation and recovery platform.",
 )
 
+app.include_router(health_router)
 event_store = EventStore()
 
 
@@ -22,7 +25,6 @@ def health() -> dict[str, str]:
 
 @app.post("/demo/evaluate")
 def demo_evaluate() -> dict:
-    """Run the reproducible deterministic demo pipeline."""
     result = run_evaluation()
     return {
         "transaction_count": result.transaction_count,
@@ -50,14 +52,12 @@ async def razorpay_webhook(
 
     body = await request.body()
     try:
-        event = parse_payment_webhook(
-            body,
-            x_razorpay_event_id,
-            x_razorpay_signature,
-            secret,
-        )
+        event = parse_payment_webhook(body, x_razorpay_event_id, x_razorpay_signature, secret)
     except WebhookVerificationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    metrics.webhook_events += 1
     accepted = event_store.add_if_new(event)
+    if not accepted:
+        metrics.duplicate_events += 1
     return {"accepted": accepted, "event_id": event.event_id, "event_type": event.event_type}
