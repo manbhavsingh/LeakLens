@@ -67,7 +67,7 @@ const $ = id => document.getElementById(id);
 async function run() {
   $('run').disabled = true; $('run').textContent = 'Investigating…';
   try {
-    const response = await fetch('http://localhost:8000/demo/evaluate', { method:'POST' });
+    const response = await fetch('/demo/evaluate', { method:'POST' });
     if (!response.ok) throw new Error('API returned ' + response.status);
     const data = await response.json();
     $('transactions').textContent = data.transaction_count.toLocaleString();
