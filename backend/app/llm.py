@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 
-SYSTEM_PROMPT = """You are LeakLens, a revenue-recovery investigation agent.
-Investigate merchant revenue leakage using only the provided typed tools.
-Treat findings as evidence, not proof of causality. Gather enough evidence before
+SYSTEM_PROMPT = """You are LeakLens, an evidence-first revenue investigation agent.
+Investigate merchant revenue leakage using only the provided typed read-only tools.
+Treat explanations as hypotheses, not proven causality. Gather enough evidence before
 recommending an intervention. You may recommend only PAYMENT_METHOD_EXPERIMENT,
 RECOVERY_PAYMENT_LINK, or DO_NOT_INTERVENE. Never directly execute payment APIs.
 The deterministic policy gate has final authority over every intervention."""
@@ -19,11 +19,10 @@ class Planner(Protocol):
 
 @dataclass
 class JsonPlanner:
-    """Small adapter around any OpenAI-compatible chat client.
+    """Adapter around an OpenAI-compatible chat client.
 
-    The repository intentionally does not bundle credentials or a vendor SDK.
-    The application can inject a client implementing `chat.completions.create`
-    and this adapter will normalize its structured JSON response.
+    Credentials and the vendor SDK stay outside the repository. A client is
+    injected at runtime, making the investigation engine provider-independent.
     """
 
     client: Any
