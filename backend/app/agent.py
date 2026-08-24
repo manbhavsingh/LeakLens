@@ -2,124 +2,107 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Protocol
 
-from .investigator import investigate
 from .models import Transaction
-from .policy import validate_action
+from .policy import PolicyDecision, validate_action
+from .tool_dispatcher import InvestigatorToolDispatcher, ToolExecutionError
+from .tool_schema import TOOLS
 
 
-Tool = Callable[..., Any]
+SYSTEM_PROMPT = """You are LeakLens, an evidence-first revenue investigation agent.
+Investigate revenue leakage using only the provided read-only tools. Treat
+explanations as hypotheses, not proven causality. Gather enough evidence before
+recommending an intervention. You may recommend only PAYMENT_METHOD_EXPERIMENT,
+RECOVERY_PAYMENT_LINK, or DO_NOT_INTERVENE. The policy engine makes the final
+authorization decision. Return final decisions as JSON with fields: hypothesis,
+confidence, action, expected_revenue, rationale, evidence."""
+
+
+class LLMClient(Protocol):
+    def complete(self, *, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
 class AgentStep:
-    tool: str
+    kind: str
+    name: str
     arguments: dict[str, Any]
-    observation: Any
+    result: Any
 
 
 @dataclass(frozen=True)
 class AgentResult:
-    hypothesis: str
-    action: str
-    confidence: float
-    expected_revenue: float
-    evidence: tuple[str, ...]
+    decision: dict[str, Any]
+    policy: PolicyDecision
     steps: tuple[AgentStep, ...]
-    policy_allowed: bool
-    policy_reason: str
 
 
 class LeakLensAgent:
-    """Agent boundary for LeakLens.
+    """Bounded LLM tool-calling loop with a deterministic policy boundary."""
 
-    The current implementation uses deterministic tool calls so the entire
-    investigation is executable without an API key. A model adapter can later
-    replace the planner while keeping the same tools and policy boundary.
-    """
+    def __init__(self, llm: LLMClient, transactions: list[Transaction], max_steps: int = 6):
+        self.llm = llm
+        self.dispatcher = InvestigatorToolDispatcher(transactions)
+        self.max_steps = max_steps
 
-    def __init__(self, transactions: list[Transaction]):
-        self.transactions = transactions
-        self.steps: list[AgentStep] = []
+    def run(self, finding: dict[str, Any]) -> AgentResult:
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps({"finding": finding})},
+        ]
+        steps: list[AgentStep] = []
 
-    def run(self) -> list[AgentResult]:
-        investigations = investigate(self.transactions)
-        results: list[AgentResult] = []
+        for _ in range(self.max_steps):
+            response = self.llm.complete(messages=messages, tools=TOOLS)
+            tool_calls = response.get("tool_calls") or []
 
-        for item in investigations:
-            self.steps.append(
-                AgentStep(
-                    tool="find_revenue_leaks",
-                    arguments={},
-                    observation={
-                        "title": item.finding.title,
-                        "cohort": item.finding.cohort,
-                        "revenue_at_risk": float(item.finding.revenue_at_risk),
-                    },
+            if not tool_calls:
+                decision = self._parse_decision(response.get("content"))
+                policy = validate_action(
+                    decision["action"],
+                    confidence=float(decision["confidence"]),
+                    expected_revenue=float(decision["expected_revenue"]),
                 )
-            )
-            self.steps.append(
-                AgentStep(
-                    tool="get_payment_failure_breakdown",
-                    arguments={"payment_method": item.finding.cohort["payment_method"]},
-                    observation=item.failure_breakdown,
-                )
-            )
+                steps.append(AgentStep("decision", "final_decision", {}, decision))
+                return AgentResult(decision=decision, policy=policy, steps=tuple(steps))
 
-            policy = validate_action(
-                item.recommended_action,
-                confidence=item.confidence,
-                expected_revenue=float(item.finding.revenue_at_risk),
-            )
+            messages.append({
+                "role": "assistant",
+                "content": response.get("content"),
+                "tool_calls": tool_calls,
+            })
 
-            results.append(
-                AgentResult(
-                    hypothesis=item.hypothesis,
-                    action=item.recommended_action,
-                    confidence=item.confidence,
-                    expected_revenue=float(item.finding.revenue_at_risk),
-                    evidence=item.evidence,
-                    steps=tuple(self.steps),
-                    policy_allowed=policy.allowed,
-                    policy_reason=policy.reason,
-                )
-            )
+            for call in tool_calls:
+                name = call.get("name")
+                arguments = call.get("arguments") or {}
+                try:
+                    result = self.dispatcher.execute(name, arguments)
+                    steps.append(AgentStep("tool", name, arguments, result))
+                except ToolExecutionError as exc:
+                    result = {"error": str(exc)}
+                    steps.append(AgentStep("tool_error", name or "unknown", arguments, result))
 
-        return results
+                messages.append({
+                    "role": "tool",
+                    "name": name,
+                    "tool_call_id": call.get("id", name),
+                    "content": json.dumps(result, default=str),
+                })
+
+        raise RuntimeError("Agent exceeded its bounded investigation step limit")
 
     @staticmethod
-    def tool_schemas() -> list[dict[str, Any]]:
-        """OpenAI-compatible function schemas for a future model adapter."""
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "find_revenue_leaks",
-                    "description": "Find cohort-level revenue leakage candidates.",
-                    "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_payment_failure_breakdown",
-                    "description": "Break down payment failures by reason.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"payment_method": {"type": "string"}},
-                        "additionalProperties": False,
-                    },
-                },
-            },
-        ]
+    def _parse_decision(content: Any) -> dict[str, Any]:
+        if not isinstance(content, str):
+            raise ValueError("LLM must return JSON when it has no tool calls")
+        try:
+            decision = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise ValueError("LLM final response must be valid JSON") from exc
 
-    def debug_trace(self) -> str:
-        return json.dumps(
-            [
-                {"tool": step.tool, "arguments": step.arguments, "observation": step.observation}
-                for step in self.steps
-            ],
-            indent=2,
-            default=str,
-        )
+        required = {"hypothesis", "confidence", "action", "expected_revenue", "rationale", "evidence"}
+        missing = required - decision.keys()
+        if missing:
+            raise ValueError(f"LLM decision missing fields: {sorted(missing)}")
+        return decision
