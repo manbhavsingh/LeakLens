@@ -1,6 +1,9 @@
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from .e2e import run_evaluation
 from .event_store import EventStore
@@ -12,6 +15,14 @@ app = FastAPI(
     title="LeakLens API",
     version="0.1.0",
     description="AI revenue leakage investigation and recovery platform.",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(health_router)
@@ -61,3 +72,11 @@ async def razorpay_webhook(
     if not accepted:
         metrics.duplicate_events += 1
     return {"accepted": accepted, "event_id": event.event_id, "event_type": event.event_type}
+
+
+@app.get("/")
+def dashboard() -> FileResponse:
+    frontend = Path(__file__).resolve().parents[2] / "frontend" / "index.html"
+    if not frontend.exists():
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    return FileResponse(frontend)
