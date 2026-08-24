@@ -1,52 +1,99 @@
 # LeakLens
 
-**AI Revenue Recovery Scientist**
+**AI Revenue Leakage Investigator for payment systems**
 
-LeakLens discovers where merchant revenue is leaking, investigates the evidence, forms testable hypotheses, proposes bounded interventions, and measures whether those interventions recover incremental revenue.
+LeakLens detects cohort-level payment conversion degradation, investigates it with evidence-gathering tools, applies a bounded policy gate, and tracks whether an intervention actually recovered revenue.
 
-## Current milestone
+## Why it is different
 
-Phase 1 implementation: deterministic analytics foundation and synthetic merchant universe.
-
-The system deliberately keeps the analytics layer deterministic before adding an LLM investigator. This gives the agent auditable tools and an objective evaluation environment.
+LeakLens is not an LLM dashboard that summarizes payment data. The model operates inside a bounded investigation loop: it must gather evidence through explicit read-only tools, produce a structured hypothesis and recommendation, and pass a deterministic policy gate before an intervention can execute.
 
 ## Architecture
 
 ```text
-Synthetic / Razorpay Events
-          |
-          v
-     Event Ingestion
-          |
-          v
-   PostgreSQL Event Store
-          |
-          v
- Deterministic Analytics
-          |
-          v
-    AI Investigator
-          |
-          v
- Policy / Safety Gate
-          |
-          v
-     Intervention
-          |
-          v
-  Experiment + Measurement
+Razorpay webhook
+      |
+      v
+Signature verification
+      |
+      v
+PostgreSQL event store
+      |
+      v
+PostgreSQL job queue (FOR UPDATE SKIP LOCKED)
+      |
+      v
+Worker pool
+      |
+      v
+Leak detector + AI investigator
+      |
+      +----> read-only analytics tools
+      |
+      v
+Policy gate
+      |
+      v
+Intervention executor
+      |
+      v
+Razorpay Payment Link / experiment
+      |
+      v
+Webhook outcome
+      |
+      v
+Recovery ledger + revenue metrics
 ```
 
-## Development
+## Safety and reliability
 
-The first milestone uses Python, FastAPI, SQLAlchemy, PostgreSQL, and pytest.
+- Webhook signatures are verified before ingestion.
+- Event IDs are idempotent.
+- Jobs are claimed with PostgreSQL `FOR UPDATE SKIP LOCKED`.
+- Stale jobs can be reclaimed after worker failure.
+- Interventions are allowlisted and confidence-gated.
+- Recovery attribution uses an explicit intervention reference ID.
+- Tests use a fake payment provider; credentials are never committed.
+
+## Local demo
+
+### Backend
+
+Configure variables from `backend/.env.example`, then run FastAPI on port 8000:
 
 ```bash
 cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 8000
 ```
 
-See `docs/architecture.md` for the current design contract.
+The deterministic demo endpoint is:
+
+```text
+POST /demo/evaluate
+```
+
+### Dashboard
+
+```bash
+cd frontend
+python -m http.server 5173
+```
+
+Open `http://localhost:5173` and click **Run demo investigation**.
+
+### Testing
+
+```bash
+cd backend
+pytest -q
+```
+
+CI runs the backend test suite on pushes and pull requests.
+
+## Evaluation model
+
+The deterministic demo uses synthetic transactions and an injected leak so the detection pipeline can be evaluated reproducibly. Razorpay and LLM credentials are runtime configuration and are not required for the unit-test suite.
