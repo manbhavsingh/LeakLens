@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: leaklens
+      POSTGRES_PASSWORD: leaklens
+      POSTGRES_DB: leaklens
+    ports:
+      - "5432:5432"
+    volumes:
+      - leaklens-postgres:/var/lib/postgresql/data
+
+volumes:
+  leaklens-postgres:
