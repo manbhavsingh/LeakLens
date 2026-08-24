@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,3 +12,5 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+engine = create_engine(settings.database_url, pool_pre_ping=True)
+SessionLocal = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
