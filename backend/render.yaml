@@ -1,0 +1,28 @@
+# render.yaml — Deploy LeakLens FastAPI backend on Render
+# Docs: https://render.com/docs/yaml-spec
+services:
+  - type: web
+    name: leaklens-api
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: LEAKSLENS_LLM_API_KEY
+        sync: false
+      - key: LEAKSLENS_LLM_MODEL
+        value: gpt-4.1-mini
+      - key: LEAKSLENS_LLM_BASE_URL
+        value: https://api.openai.com/v1
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: leaklens-postgres
+          property: connectionString
