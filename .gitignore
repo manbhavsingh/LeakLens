@@ -1,13 +1,6 @@
-.venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.coverage
-htmlcov/
 .env
-.env.*
-!.env.example
-postgres-data/
+__pycache__/
+.venv/
 .DS_Store
-node_modules/
-dist/
+*.pyc
+.pytest_cache/

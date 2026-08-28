@@ -31,6 +31,7 @@ class Evaluation:
     intervention: dict[str, Any] | None
     recovery: dict[str, Any] | None
     agent_used: bool
+    confidence: float | None
 
 
 def _get_llm_client() -> LLMClient | None:
@@ -126,4 +127,5 @@ def run_evaluation(*, count: int = 10_000, seed: int = 42) -> Evaluation:
         } if intervention_result is not None else None,
         recovery=recovery_dict,
         agent_used=agent_used,
+        confidence=float(top_investigation.confidence) if top_investigation else None,
     )

@@ -49,6 +49,25 @@ def demo_evaluate() -> dict:
         "hypothesis": result.hypothesis,
         "recommended_action": result.recommended_action,
         "policy_allowed": result.policy_allowed,
+        "confidence": result.confidence,
+    }
+
+
+@app.get("/api/evaluation")
+def get_evaluation() -> dict:
+    result = run_evaluation()
+    return {
+        "transaction_count": result.transaction_count,
+        "injected_leak": result.injected_leak,
+        "ground_truth_revenue_at_risk": str(result.ground_truth_revenue_at_risk),
+        "detected_findings": result.detected_findings,
+        "top_finding": result.top_finding,
+        "hypothesis": result.hypothesis,
+        "recommended_action": result.recommended_action,
+        "policy_allowed": result.policy_allowed,
+        "intervention": result.intervention,
+        "recovery": result.recovery,
+        "confidence": result.confidence,
     }
 
 
@@ -70,7 +89,6 @@ async def razorpay_webhook(
     except WebhookVerificationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Wire recovery webhook processing for live-mode payment events
     try:
         result = process_payment_event(event, recovery_ledger)
     except Exception:
@@ -81,13 +99,71 @@ async def razorpay_webhook(
     if not accepted:
         metrics.duplicate_events += 1
 
-    # Enqueue investigation job for live events
     from .pipeline import enqueue_memory_job
     from .jobs import JobQueue
     job_queue = JobQueue()
     enqueue_memory_job(job_queue, event.event_id)
 
     return {"accepted": accepted, "event_id": event.event_id, "event_type": event.event_type, "recovery_processed": result, "job_queued": job_queue.event_to_job.get(event.event_id) is not None}
+
+
+@app.get("/metrics")
+def get_metrics() -> dict:
+    return {
+        "webhook_events": metrics.webhook_events,
+        "duplicate_events": metrics.duplicate_events,
+        "jobs_succeeded": metrics.jobs_succeeded,
+        "investigations": metrics.investigations,
+        "interventions_allowed": metrics.interventions_allowed,
+        "interventions_blocked": metrics.interventions_blocked,
+    }
+
+
+@app.get("/api/interventions")
+def list_interventions() -> dict:
+    """Audit trail: every recovery intervention the ledger has tracked."""
+    records = []
+    for r in recovery_ledger.records.values():
+        records.append({
+            "reference_id": r.reference_id,
+            "customer_id": r.customer_id,
+            "amount": str(r.amount),
+            "status": r.status,
+            "paid_amount": str(r.paid_amount),
+            "payment_id": r.payment_id,
+        })
+    recovered = recovery_ledger.recovered_revenue()
+    total_attempted = sum((r.amount for r in recovery_ledger.records.values()), recovered.__class__("0"))
+    rate = (recovered / total_attempted) if total_attempted > 0 else 0.0
+    return {
+        "intervention_count": len(records),
+        "recovered_revenue": str(recovered),
+        "recovery_rate": float(rate),
+        "records": records,
+    }
+
+
+@app.post("/demo/simulate-webhook")
+def simulate_webhook() -> dict:
+    """Run a real, signed Razorpay webhook through the entire pipeline and
+    report the live state for the frontend demo."""
+    from .demo_runner import run_live_simulation
+    return run_live_simulation(recovery_ledger=recovery_ledger, event_store=event_store)
+
+
+@app.get("/demo/live-state")
+def live_state() -> dict:
+    """Snapshot of recent pipeline activity (events, jobs, recovery)."""
+    recovered = recovery_ledger.recovered_revenue()
+    total_attempted = sum((r.amount for r in recovery_ledger.records.values()), recovered.__class__("0"))
+    rate = float(recovered / total_attempted) if total_attempted > 0 else 0.0
+    return {
+        "events_received": event_store.count(),
+        "interventions": len(recovery_ledger.records),
+        "paid_interventions": sum(1 for r in recovery_ledger.records.values() if str(r.status) == "paid"),
+        "recovered_revenue": str(recovered),
+        "recovery_rate": rate,
+    }
 
 
 @app.get("/")

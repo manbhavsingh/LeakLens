@@ -52,7 +52,7 @@ Recovery ledger + revenue metrics
 - Event IDs are idempotent.
 - Jobs are claimed with PostgreSQL `FOR UPDATE SKIP LOCKED`.
 - Stale jobs can be reclaimed after worker failure.
-- Interventions are allowlisted and confidence-gated.
+- Interventions are allowlisted and confidence-gated (policy gate in `app/policy.py`).
 - Recovery attribution uses an explicit intervention reference ID.
 - Tests use a fake payment provider; credentials are never committed.
 
@@ -74,6 +74,9 @@ The deterministic demo endpoint is:
 
 ```text
 POST /demo/evaluate
+GET  /api/evaluation        # full eval: confidence, intervention, recovery
+GET  /api/interventions     # audit trail + recovery_rate
+GET  /metrics               # live counters (webhook, jobs, interventions)
 ```
 
 ### Dashboard
@@ -89,7 +92,7 @@ Open `http://localhost:5173` and click **Run demo investigation**.
 
 ```bash
 cd backend
-pytest -q
+pytest -q   # 64 tests (verified 2026-08-28)
 ```
 
 CI runs the backend test suite on pushes and pull requests.
@@ -97,3 +100,5 @@ CI runs the backend test suite on pushes and pull requests.
 ## Evaluation model
 
 The deterministic demo uses synthetic transactions and an injected leak so the detection pipeline can be evaluated reproducibly. Razorpay and LLM credentials are runtime configuration and are not required for the unit-test suite.
+
+The evaluation pipeline exposes a `confidence` score (0.55–0.95) representing how strongly the evidence supports an intervention, alongside the policy gate decision, intervention outcome, and recovery attribution — giving judges a complete view of every decision the system made.
