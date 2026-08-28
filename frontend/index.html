@@ -79,7 +79,7 @@
   </style>
 </head>
 <body>
-  <div class="loader-overlay" id="loader">
+  <div class="loader-overlay hidden" id="loader" aria-hidden="true">
     <div style="text-align: center;">
       <div class="loader-spinner"></div>
       <div class="loader-text">Running pipeline …</div>
@@ -184,6 +184,7 @@
 
     btn.addEventListener('click', async () => {
       loader.classList.remove('hidden');
+      loader.setAttribute('aria-hidden', 'false');
       btn.disabled = true;
       btn.textContent = 'Running …';
 
@@ -300,6 +301,7 @@
         alert(msg + ' Make sure backend URL is set via window.BACKEND_URL or same-origin.');
       } finally {
         loader.classList.add('hidden');
+        loader.setAttribute('aria-hidden', 'true');
         btn.disabled = false;
         btn.textContent = 'Run demo investigation';
       }
