@@ -31,11 +31,13 @@ class InterventionExecutor:
         expected_revenue: float,
         reference_id: str,
         amount: int,
+        max_expected_revenue: float = 100_000.0,
     ) -> InterventionResult:
         policy = validate_action(
             action,
             confidence=confidence,
             expected_revenue=expected_revenue,
+            max_expected_revenue=max_expected_revenue,
         )
         if not policy.allowed:
             return InterventionResult(action, False, reference_id, {}, policy.reason)

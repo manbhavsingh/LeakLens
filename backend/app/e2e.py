@@ -77,6 +77,7 @@ def run_evaluation(*, count: int = 10_000, seed: int = 42) -> Evaluation:
                 expected_revenue=float(top_investigation.finding.revenue_at_risk),
                 reference_id=f"leak_{seed}",
                 amount=int(float(top.revenue_at_risk)) if top else 0,
+                max_expected_revenue=250_000.0,
             )
     else:
         allowed = None
