@@ -79,7 +79,7 @@
   </style>
 </head>
 <body>
-  <div class="loader-overlay hidden" id="loader" aria-hidden="true">
+  <div class="loader-overlay hidden" id="loader">
     <div style="text-align: center;">
       <div class="loader-spinner"></div>
       <div class="loader-text">Running pipeline …</div>
@@ -162,9 +162,27 @@
     let chartInstance = null;
 
     function formatCurrency(num) {
-      if (num === null || num === undefined) return '—';
-      const n = typeof num === 'string' ? parseFloat(num) : num;
-      return '₹' + (n / 100).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      if (num === null || num === undefined || num === '') return '—';
+      const n = Number(num);
+      if (!Number.isFinite(n)) return '—';
+      return '₹' + n.toLocaleString('en-IN', {
+        maximumFractionDigits: 0,
+      });
+    }
+
+    function formatCohort(cohort) {
+      if (!cohort || typeof cohort !== 'object') return 'Unknown cohort';
+      const method = cohort.payment_method ? String(cohort.payment_method).toUpperCase() : '';
+      const device = cohort.device ? String(cohort.device).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '';
+      return [method, device].filter(Boolean).join(' · ') || 'Unknown cohort';
+    }
+
+    function formatAction(action) {
+      if (!action) return 'No intervention';
+      return String(action)
+        .replace(/_/g, ' ')
+        .toLowerCase()
+        .replace(/\b\w/g, c => c.toUpperCase());
     }
 
     function setStage(id, status) {
@@ -184,7 +202,6 @@
 
     btn.addEventListener('click', async () => {
       loader.classList.remove('hidden');
-      loader.setAttribute('aria-hidden', 'false');
       btn.disabled = true;
       btn.textContent = 'Running …';
 
@@ -204,35 +221,34 @@
         // Pipeline stages
         const stages = d.pipeline_stages || {};
         const stageNames = ['received','verified','ingested','detected','investigated','policed','intervened','recovered'];
-        stageNames.forEach((s, i) => {
-          const id = 's-' + s;
-          const key = s === 'ingested' ? 'ingested' : s === 'investigated' ? 'investigated' : s === 'intervened' ? 'intervened' : s === 'policed' ? 'policed' : s;
-          const has = stages[key] !== undefined || stages[s] !== undefined;
-          setStage(id, has ? 'done' : '');
+        stageNames.forEach((s) => {
+          const has = stages[s] !== undefined;
+          setStage('s-' + s, has ? 'done' : '');
         });
-        // Highlight last completed
-        let lastDone = -1;
-        stageNames.forEach((s, i) => {
-          if (stages[s] !== undefined || stages[s === 'policed' ? 'policed' : s] !== undefined) lastDone = i;
-        });
-        if (lastDone >= 0) setStage('s-' + stageNames[lastDone], 'done');
-        if (d.error) {
-          setStage('s-recovered', 'critical');
-        }
+
+        // The backend records investigation/policy as one logical step and may
+        // complete the pipeline without actually executing an intervention or
+        // recovering money. Reflect that distinction visually instead of
+        // implying that money was recovered when it was not.
+        if (stages.policied !== undefined) setStage('s-investigated', 'done');
+        if (stages.policied !== undefined) setStage('s-policed', 'done');
+        if (!d.intervention_executed && stages.intervened !== undefined) setStage('s-intervened', 'warn');
+        if (!(Number(d.cumulative_recovered) > 0) && stages.recovered !== undefined) setStage('s-recovered', 'warn');
+        if (d.error) setStage('s-recovered', 'critical');
 
         // Stats
         const revRisk = d.finding ? d.finding.revenue_at_risk : null;
-        document.getElementById('val-risk').textContent = revRisk ? formatCurrency(revRisk) : '—';
-        document.getElementById('sub-risk').textContent = d.finding ? d.finding.cohort : '';
+        document.getElementById('val-risk').textContent = revRisk !== null && revRisk !== undefined ? formatCurrency(revRisk) : '—';
+        document.getElementById('sub-risk').textContent = d.finding ? formatCohort(d.finding.cohort) : '';
 
-        document.getElementById('val-recovered').textContent = d.cumulative_recovered ? formatCurrency(d.cumulative_recovered) : '—';
+        document.getElementById('val-recovered').textContent = formatCurrency(d.cumulative_recovered ?? 0);
         document.getElementById('sub-recovered').textContent = d.overall_recovery_rate !== undefined ? (d.overall_recovery_rate * 100).toFixed(1) + '% recovery rate' : '';
 
         document.getElementById('val-confidence').textContent = d.confidence !== undefined ? (d.confidence * 100).toFixed(0) + '%' : '—';
         document.getElementById('sub-confidence').textContent = d.policy_allowed !== undefined ? (d.policy_allowed ? 'Policy allowed' : 'Policy blocked') : '';
 
         document.getElementById('val-interventions').textContent = d.cumulative_interventions !== undefined ? String(d.cumulative_interventions) : '—';
-        document.getElementById('sub-interventions').textContent = d.intervention_executed ? 'Executed' : 'Not executed';
+        document.getElementById('sub-interventions').textContent = d.intervention_executed ? 'Executed' : (d.intervention_action ? formatAction(d.intervention_action) + ' — not executed' : 'Not executed');
 
         // Finding details
         let findingHtml = '';
@@ -240,7 +256,7 @@
           const drop = d.finding.conversion_drop !== undefined ? (d.finding.conversion_drop * 100).toFixed(2) : '—';
           findingHtml = `
             <div class="finding-title">${d.finding.title || 'Detected cohort degradation'}</div>
-            <div class="cohort-tag">${d.finding.cohort || 'Unknown cohort'}</div>
+            <div class="cohort-tag">${formatCohort(d.finding.cohort)}</div>
             <div class="metric-row">
               <div class="mini-metric"><div class="mini-label">Conversion Rate</div><div class="mini-value">${(d.finding.conversion_rate * 100).toFixed(2)}%</div></div>
               <div class="mini-metric"><div class="mini-label">Baseline</div><div class="mini-value">${(d.finding.baseline_conversion_rate * 100).toFixed(2)}%</div></div>
@@ -248,6 +264,7 @@
               <div class="mini-metric"><div class="mini-label">At Risk</div><div class="mini-value">${formatCurrency(d.finding.revenue_at_risk)}</div></div>
             </div>
             <p style="color: var(--text-secondary); font-size: 14px; line-height: 1.6;">${d.hypothesis || 'Investigating cohort-level conversion degradation.'}</p>
+            <div class="cohort-tag" style="margin-top: 8px;">Recommended action: ${formatAction(d.intervention_action)}</div>
           `;
         } else {
           findingHtml = '<p style="color: var(--text-secondary);">No finding detected in this run.</p>';
@@ -258,10 +275,10 @@
         const chartWrap = document.getElementById('chart-wrap');
         chartWrap.style.display = 'block';
         const ctx = document.getElementById('recoveryChart').getContext('2d');
-        const labels = ['Recovered', 'Remaining At Risk', 'Total Interventions'];
-        const recoveredVal = d.cumulative_recovered ? parseFloat(d.cumulative_recovered) / 100 : 0;
-        const totalVal = d.finding && d.finding.revenue_at_risk ? parseFloat(d.finding.revenue_at_risk) / 100 : 0;
-        const interventionCount = d.cumulative_interventions || 0;
+        const labels = ['Recovered', 'Remaining At Risk'];
+        const recoveredVal = Number(d.cumulative_recovered || 0);
+        const totalVal = Number(d.finding?.revenue_at_risk || 0);
+        const remainingRisk = Math.max(totalVal - recoveredVal, 0);
         if (chartInstance) chartInstance.destroy();
         chartInstance = new Chart(ctx, {
           type: 'bar',
@@ -269,8 +286,8 @@
             labels: ['Recovered (₹)', 'At Risk (₹)', 'Interventions'],
             datasets: [{
               label: 'Value',
-              data: [recoveredVal, totalVal - recoveredVal, interventionCount],
-              backgroundColor: ['#4ade9a', '#f25b5b', '#4a8ce8'],
+              data: [recoveredVal, remainingRisk],
+              backgroundColor: ['#4ade9a', '#f25b5b'],
               borderRadius: 6,
             }]
           },
@@ -301,7 +318,6 @@
         alert(msg + ' Make sure backend URL is set via window.BACKEND_URL or same-origin.');
       } finally {
         loader.classList.add('hidden');
-        loader.setAttribute('aria-hidden', 'true');
         btn.disabled = false;
         btn.textContent = 'Run demo investigation';
       }
