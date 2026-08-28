@@ -10,6 +10,8 @@ from .event_store import EventStore
 from .health import router as health_router
 from .observability import metrics
 from .razorpay import WebhookVerificationError, parse_payment_webhook
+from .recovery import RecoveryLedger
+from .recovery_webhook import process_payment_event
 
 app = FastAPI(
     title="LeakLens API",
@@ -27,6 +29,7 @@ app.add_middleware(
 
 app.include_router(health_router)
 event_store = EventStore()
+recovery_ledger = RecoveryLedger()
 
 
 @app.get("/health")
@@ -67,11 +70,24 @@ async def razorpay_webhook(
     except WebhookVerificationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # Wire recovery webhook processing for live-mode payment events
+    try:
+        result = process_payment_event(event, recovery_ledger)
+    except Exception:
+        result = False
+
     metrics.webhook_events += 1
     accepted = event_store.add_if_new(event)
     if not accepted:
         metrics.duplicate_events += 1
-    return {"accepted": accepted, "event_id": event.event_id, "event_type": event.event_type}
+
+    # Enqueue investigation job for live events
+    from .pipeline import enqueue_memory_job
+    from .jobs import JobQueue
+    job_queue = JobQueue()
+    enqueue_memory_job(job_queue, event.event_id)
+
+    return {"accepted": accepted, "event_id": event.event_id, "event_type": event.event_type, "recovery_processed": result, "job_queued": job_queue.event_to_job.get(event.event_id) is not None}
 
 
 @app.get("/")
