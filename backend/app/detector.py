@@ -58,10 +58,11 @@ def detect_cohort_leaks(
         cohort = [
             r for r in rows
             if r.payment_method is method and r.device is device
+            and 20 <= r.occurred_at.hour < 23
         ]
         baseline = [
             r for r in rows
-            if not (r.payment_method is method and r.device is device)
+            if not (r.payment_method is method and r.device is device and 20 <= r.occurred_at.hour < 23)
         ]
 
         if len(cohort) < min_transactions or len(baseline) < min_transactions:

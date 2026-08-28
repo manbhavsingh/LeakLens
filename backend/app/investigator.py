@@ -5,6 +5,7 @@ from typing import Iterable
 
 from .detector import LeakCandidate, detect_cohort_leaks
 from .leak_tools import get_payment_failure_breakdown
+from .agent import LLMClient, LeakLensAgent
 from .models import Transaction
 
 
@@ -18,7 +19,10 @@ class Investigation:
     evidence: tuple[str, ...]
 
 
-def investigate(transactions: Iterable[Transaction]) -> list[Investigation]:
+def investigate(
+    transactions: Iterable[Transaction],
+    llm: LLMClient | None = None,
+) -> list[Investigation]:
     """Run an auditable investigation without an LLM.
 
     This is the deterministic scaffold the eventual tool-calling LLM will use.

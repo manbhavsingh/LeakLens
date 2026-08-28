@@ -38,6 +38,7 @@ def run_evaluation(*, count: int = 10_000, seed: int = 42) -> Evaluation:
             top_investigation.recommended_action,
             confidence=top_investigation.confidence,
             expected_revenue=float(top_investigation.finding.revenue_at_risk),
+            max_expected_revenue=250_000.0,
         )
         allowed = policy.allowed
     else:

@@ -1,12 +1,13 @@
 from app.worker_handler import InvestigationJobHandler
 
 
-class FakeAgent:
-    class Policy:
-        allowed = True
-        action = "DO_NOT_INTERVENE"
-        reason = "No intervention needed."
+class PolicyMock:
+    allowed = True
+    action = "DO_NOT_INTERVENE"
+    reason = "No intervention needed."
 
+
+class FakeAgent:
     class Result:
         decision = {
             "hypothesis": "insufficient evidence",
@@ -16,7 +17,7 @@ class FakeAgent:
             "rationale": "observe only",
             "evidence": [],
         }
-        policy = Policy()
+        policy = PolicyMock()
         trace = ({"type": "decision"},)
 
     def investigate(self, _finding):
